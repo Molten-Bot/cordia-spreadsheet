@@ -1,35 +1,22 @@
 // Google Analytics default capture for this template.
 // Future LLM edits: do not remove this gtag setup unless replacing it with equivalent page analytics capture.
 const googleAnalyticsId = "G-ZKTPLMMFDQ";
-const storageKey = "cordia-template-state";
-
-type Theme = "system" | "light" | "dark";
-
-export interface Item {
-  id: string;
-  text: string;
-  done: boolean;
-}
+const storageKey = "spreadsheet-state";
+const rowCount = 24;
+const columnLabels = ["A", "B", "C", "D", "E", "F", "G", "H"];
 
 export interface AppState {
-  appName: string;
-  theme: Theme;
-  items: Item[];
+  cells: string[][];
 }
 
-type ItemPatch = Partial<Pick<Item, "text" | "done">>;
-
 interface AppElements {
-  appNameInput: HTMLInputElement;
-  clearItemsButton: HTMLButtonElement;
-  itemCount: HTMLElement;
-  itemForm: HTMLFormElement;
-  itemInput: HTMLInputElement;
-  itemList: HTMLUListElement;
+  cellCount: HTMLElement;
+  clearSheetButton: HTMLButtonElement;
+  downloadCsvButton: HTMLButtonElement;
+  downloadJsonButton: HTMLButtonElement;
+  grid: HTMLTableElement;
   navLinks: NodeListOf<HTMLAnchorElement>;
   saveState: HTMLElement;
-  themeSelect: HTMLSelectElement;
-  title: HTMLHeadingElement;
 }
 
 declare global {
@@ -39,34 +26,31 @@ declare global {
   }
 }
 
-function createItem(text: string, done: boolean, idFactory: () => string): Item {
-  return { id: idFactory(), text, done };
+function createEmptyRows(): string[][] {
+  return Array.from({ length: rowCount }, () => Array.from({ length: columnLabels.length }, () => ""));
 }
 
-export function createDefaultState(idFactory: () => string = () => crypto.randomUUID()): AppState {
-  return {
-    appName: "Cordia",
-    theme: "system",
-    items: [
-      createItem("Replace starter content", false, idFactory),
-      createItem("Add app-specific data model", false, idFactory),
-      createItem("Publish public folder to your hosting provider", true, idFactory),
-    ],
-  };
+export function createDefaultState(): AppState {
+  const cells = createEmptyRows();
+  cells[0] = ["Project", "Owner", "Status", "Due", "Budget", "Notes", "Priority", "Updated"];
+  cells[1] = ["Website launch", "Team", "In progress", "2026-06-15", "$4,200", "Public spreadsheet", "High", "Today"];
+  cells[2] = ["Content pass", "Editorial", "Ready", "2026-06-07", "$900", "Export after review", "Medium", "Today"];
+  cells[3] = ["QA sweep", "Ops", "Open", "2026-06-10", "$1,100", "Browser-only storage", "High", "Today"];
+  return { cells };
 }
 
-function isTheme(value: unknown): value is Theme {
-  return value === "system" || value === "light" || value === "dark";
+function normalizeCell(value: unknown): string {
+  return typeof value === "string" ? value.slice(0, 200) : "";
 }
 
-function isItem(value: unknown): value is Item {
-  if (!value || typeof value !== "object") return false;
-  const item = value as Record<string, unknown>;
-  return (
-    typeof item.id === "string" &&
-    typeof item.text === "string" &&
-    typeof item.done === "boolean"
-  );
+function normalizeRows(value: unknown, defaultState: AppState): string[][] {
+  if (!Array.isArray(value)) return defaultState.cells;
+
+  return createEmptyRows().map((row, rowIndex) => {
+    const storedRow = value[rowIndex];
+    if (!Array.isArray(storedRow)) return row;
+    return row.map((_, columnIndex) => normalizeCell(storedRow[columnIndex]));
+  });
 }
 
 export function parseStoredState(storedState: string | null, defaultState: AppState): AppState {
@@ -74,43 +58,47 @@ export function parseStoredState(storedState: string | null, defaultState: AppSt
 
   try {
     const parsed = JSON.parse(storedState) as Record<string, unknown>;
-    return {
-      appName: typeof parsed.appName === "string" ? parsed.appName : defaultState.appName,
-      theme: isTheme(parsed.theme) ? parsed.theme : defaultState.theme,
-      items: Array.isArray(parsed.items) && parsed.items.every(isItem) ? parsed.items : defaultState.items,
-    };
+    return { cells: normalizeRows(parsed.cells, defaultState) };
   } catch {
     return defaultState;
   }
 }
 
-export function updateItem(state: AppState, id: string, patch: ItemPatch): AppState {
+export function updateCell(state: AppState, rowIndex: number, columnIndex: number, value: string): AppState {
   return {
-    ...state,
-    items: state.items.map((item) => (item.id === id ? { ...item, ...patch } : item)),
+    cells: state.cells.map((row, currentRow) =>
+      row.map((cell, currentColumn) =>
+        currentRow === rowIndex && currentColumn === columnIndex ? value.slice(0, 200) : cell,
+      ),
+    ),
   };
 }
 
-export function removeItem(state: AppState, id: string): AppState {
-  return {
-    ...state,
-    items: state.items.filter((item) => item.id !== id),
-  };
+export function clearSheet(state: AppState): AppState {
+  return { ...state, cells: createEmptyRows() };
 }
 
-export function addItem(
-  state: AppState,
-  text: string,
-  idFactory: () => string = () => crypto.randomUUID(),
-): AppState {
-  return {
-    ...state,
-    items: [createItem(text, false, idFactory), ...state.items],
-  };
+export function countFilledCells(state: AppState): number {
+  return state.cells.flat().filter((cell) => cell.trim()).length;
 }
 
-export function clearDoneItems(state: AppState): AppState {
-  return { ...state, items: state.items.filter((item) => !item.done) };
+function escapeCsvCell(value: string): string {
+  return /[",\n\r]/.test(value) ? `"${value.replaceAll("\"", "\"\"")}"` : value;
+}
+
+export function toCsv(state: AppState): string {
+  return state.cells.map((row) => row.map(escapeCsvCell).join(",")).join("\n");
+}
+
+export function toJson(state: AppState): string {
+  const [headerRow = []] = state.cells;
+  const rows = state.cells.slice(1).map((row) =>
+    Object.fromEntries(
+      row.map((cell, index) => [headerRow[index]?.trim() || columnLabels[index] || `Column ${index + 1}`, cell]),
+    ),
+  );
+
+  return JSON.stringify({ columns: columnLabels, cells: state.cells, rows }, null, 2);
 }
 
 function initializeGoogleAnalytics() {
@@ -138,17 +126,25 @@ function getElement<T extends Element>(selector: string, type: { new (): T }): T
 
 function getElements(): AppElements {
   return {
-    appNameInput: getElement("#app-name", HTMLInputElement),
-    clearItemsButton: getElement("#clear-items", HTMLButtonElement),
-    itemCount: getElement("#item-count", HTMLElement),
-    itemForm: getElement("#item-form", HTMLFormElement),
-    itemInput: getElement("#item-input", HTMLInputElement),
-    itemList: getElement("#item-list", HTMLUListElement),
+    cellCount: getElement("#cell-count", HTMLElement),
+    clearSheetButton: getElement("#clear-sheet", HTMLButtonElement),
+    downloadCsvButton: getElement("#download-csv", HTMLButtonElement),
+    downloadJsonButton: getElement("#download-json", HTMLButtonElement),
+    grid: getElement("#spreadsheet-grid", HTMLTableElement),
     navLinks: document.querySelectorAll<HTMLAnchorElement>(".nav a"),
     saveState: getElement("#save-state", HTMLElement),
-    themeSelect: getElement("#theme-select", HTMLSelectElement),
-    title: getElement(".topbar h1", HTMLHeadingElement),
   };
+}
+
+function downloadFile(filename: string, content: string, type: string) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function initializeApp() {
@@ -164,103 +160,81 @@ function initializeApp() {
     elements.saveState.textContent = "Saved locally";
     window.clearTimeout(saveTimer);
     saveTimer = window.setTimeout(() => {
-      elements.saveState.textContent = "Changes autosave";
+      elements.saveState.textContent = "Autosaved in this browser";
     }, 1600);
   }
 
-  function applyTheme() {
-    document.documentElement.dataset.theme = state.theme;
+  function renderGrid() {
+    elements.grid.replaceChildren();
+
+    const header = document.createElement("thead");
+    const headerRow = document.createElement("tr");
+    headerRow.append(document.createElement("th"));
+    columnLabels.forEach((label) => {
+      const th = document.createElement("th");
+      th.scope = "col";
+      th.textContent = label;
+      headerRow.append(th);
+    });
+    header.append(headerRow);
+
+    const body = document.createElement("tbody");
+    state.cells.forEach((row, rowIndex) => {
+      const tr = document.createElement("tr");
+      const rowHeading = document.createElement("th");
+      rowHeading.scope = "row";
+      rowHeading.textContent = String(rowIndex + 1);
+      tr.append(rowHeading);
+
+      row.forEach((cell, columnIndex) => {
+        const td = document.createElement("td");
+        const input = document.createElement("input");
+        input.value = cell;
+        input.ariaLabel = `${columnLabels[columnIndex]}${rowIndex + 1}`;
+        input.addEventListener("input", () => {
+          state = updateCell(state, rowIndex, columnIndex, input.value);
+          saveState();
+          renderFooter();
+        });
+        td.append(input);
+        tr.append(td);
+      });
+
+      body.append(tr);
+    });
+
+    elements.grid.append(header, body);
   }
 
-  function renderItems() {
-    elements.itemList.replaceChildren();
-
-    if (state.items.length === 0) {
-      const emptyState = document.createElement("p");
-      emptyState.className = "empty-state";
-      emptyState.textContent = "No items yet. Add one to start shaping this template.";
-      elements.itemList.append(emptyState);
-      return;
-    }
-
-    state.items.forEach((item) => {
-      const row = document.createElement("li");
-      row.className = "item-row";
-      row.dataset.done = String(item.done);
-
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.checked = item.done;
-      checkbox.ariaLabel = `Mark ${item.text} complete`;
-      checkbox.addEventListener("change", () => {
-        state = updateItem(state, item.id, { done: checkbox.checked });
-        saveState();
-        render();
-      });
-
-      const label = document.createElement("span");
-      label.textContent = item.text;
-
-      const removeButton = document.createElement("button");
-      removeButton.className = "icon-button";
-      removeButton.type = "button";
-      removeButton.ariaLabel = `Remove ${item.text}`;
-      removeButton.textContent = "x";
-      removeButton.addEventListener("click", () => {
-        state = removeItem(state, item.id);
-        saveState();
-        render();
-      });
-
-      row.append(checkbox, label, removeButton);
-      elements.itemList.append(row);
-    });
+  function renderFooter() {
+    const count = countFilledCells(state);
+    elements.cellCount.textContent = `${count} ${count === 1 ? "cell" : "cells"} saved`;
   }
 
   function render() {
-    document.title = `${state.appName} App Template`;
-    elements.title.textContent = state.appName;
-    elements.appNameInput.value = state.appName;
-    elements.themeSelect.value = state.theme;
-    elements.itemCount.textContent = String(state.items.length);
-    applyTheme();
-    renderItems();
+    renderGrid();
+    renderFooter();
   }
 
   function updateCurrentNavLink() {
-    const currentHash = window.location.hash || "#overview";
+    const currentHash = window.location.hash || "#sheet";
     elements.navLinks.forEach((link) => {
       link.setAttribute("aria-current", link.getAttribute("href") === currentHash ? "page" : "false");
     });
   }
 
-  elements.itemForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const text = elements.itemInput.value.trim();
-    if (!text) return;
-    state = addItem(state, text);
-    saveState();
-    render();
-    elements.itemInput.value = "";
-    elements.itemInput.focus();
-  });
-
-  elements.clearItemsButton.addEventListener("click", () => {
-    state = clearDoneItems(state);
+  elements.clearSheetButton.addEventListener("click", () => {
+    state = clearSheet(state);
     saveState();
     render();
   });
 
-  elements.appNameInput.addEventListener("input", () => {
-    state = { ...state, appName: elements.appNameInput.value.trim() || "Cordia" };
-    saveState();
-    render();
+  elements.downloadCsvButton.addEventListener("click", () => {
+    downloadFile("spreadsheet.csv", toCsv(state), "text/csv");
   });
 
-  elements.themeSelect.addEventListener("change", () => {
-    state = { ...state, theme: elements.themeSelect.value as Theme };
-    saveState();
-    render();
+  elements.downloadJsonButton.addEventListener("click", () => {
+    downloadFile("spreadsheet.json", toJson(state), "application/json");
   });
 
   window.addEventListener("hashchange", updateCurrentNavLink);
