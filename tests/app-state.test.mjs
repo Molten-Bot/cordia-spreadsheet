@@ -73,19 +73,38 @@ test("formulas evaluate arithmetic, references, and range functions", () => {
   assert.equal(evaluateCell(state, 2, 1), "10");
 });
 
-test("exports CSV and JSON downloads from sheet state", () => {
+test("exports CSV and JSON downloads from the used sheet range", () => {
   const state = {
     cells: [
-      ["Name", "Note"],
-      ["Alpha", "Needs, quote"],
-      ["Beta", "Line\nbreak"],
+      ["Name", "Note", ""],
+      ["Alpha", "Needs, quote", ""],
+      ["Beta", "Line\nbreak", ""],
+      ["", "", ""],
     ],
   };
 
   assert.equal(toCsv(state), 'Name,Note\nAlpha,"Needs, quote"\nBeta,"Line\nbreak"');
-  assert.deepEqual(JSON.parse(toJson(state)).rows[0], {
+  const exported = JSON.parse(toJson(state));
+  assert.deepEqual(exported.columns, ["A", "B"]);
+  assert.deepEqual(exported.cells, [
+    ["Name", "Note"],
+    ["Alpha", "Needs, quote"],
+    ["Beta", "Line\nbreak"],
+  ]);
+  assert.deepEqual(exported.rows[0], {
     Name: "Alpha",
     Note: "Needs, quote",
+  });
+});
+
+test("exports empty CSV and JSON when sheet has no data", () => {
+  const state = clearSheet(createDefaultState());
+
+  assert.equal(toCsv(state), "");
+  assert.deepEqual(JSON.parse(toJson(state)), {
+    columns: [],
+    cells: [],
+    rows: [],
   });
 });
 

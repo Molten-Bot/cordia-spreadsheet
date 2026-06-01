@@ -7,7 +7,7 @@ export const columnCount = 1024;
 export const columnLabels = createColumnLabels(columnCount);
 const rowHeight = 42;
 const columnWidth = 116;
-const rowHeaderWidth = 56;
+const rowHeaderWidth = 64;
 const columnHeaderHeight = 40;
 const renderBuffer = 4;
 function createColumnLabels(count) {
@@ -340,13 +340,32 @@ function evaluateFormulaValue(state, expression, seen) {
 function escapeCsvCell(value) {
     return /[",\n\r]/.test(value) ? `"${value.replaceAll("\"", "\"\"")}"` : value;
 }
+function usedRangeCells(state) {
+    let lastRowIndex = -1;
+    let lastColumnIndex = -1;
+    state.cells.forEach((row, rowIndex) => {
+        row.forEach((cell, columnIndex) => {
+            if (!cell.trim())
+                return;
+            lastRowIndex = Math.max(lastRowIndex, rowIndex);
+            lastColumnIndex = Math.max(lastColumnIndex, columnIndex);
+        });
+    });
+    if (lastRowIndex < 0 || lastColumnIndex < 0)
+        return [];
+    return state.cells.slice(0, lastRowIndex + 1).map((row) => row.slice(0, lastColumnIndex + 1));
+}
 export function toCsv(state) {
-    return state.cells.map((row) => row.map(escapeCsvCell).join(",")).join("\n");
+    return usedRangeCells(state)
+        .map((row) => row.map(escapeCsvCell).join(","))
+        .join("\n");
 }
 export function toJson(state) {
-    const [headerRow = []] = state.cells;
-    const rows = state.cells.slice(1).map((row) => Object.fromEntries(row.map((cell, index) => [headerRow[index]?.trim() || columnLabels[index] || `Column ${index + 1}`, cell])));
-    return JSON.stringify({ columns: columnLabels, cells: state.cells, rows }, null, 2);
+    const cells = usedRangeCells(state);
+    const [headerRow = []] = cells;
+    const columns = columnLabels.slice(0, cells[0]?.length ?? 0);
+    const rows = cells.slice(1).map((row) => Object.fromEntries(row.map((cell, index) => [headerRow[index]?.trim() || columnLabels[index] || `Column ${index + 1}`, cell])));
+    return JSON.stringify({ columns, cells, rows }, null, 2);
 }
 function initializeGoogleAnalytics() {
     const googleTagScript = document.createElement("script");
