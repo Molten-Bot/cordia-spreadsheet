@@ -525,6 +525,7 @@ function initializeApp() {
     const corner = document.createElement("div");
     corner.className = "grid-corner";
     corner.setAttribute("aria-hidden", "true");
+    corner.style.transform = `translate(${scrollLeft}px, ${scrollTop}px)`;
     elements.grid.append(corner);
 
     for (let columnIndex = firstColumn; columnIndex <= lastColumn; columnIndex += 1) {
@@ -532,7 +533,7 @@ function initializeApp() {
       header.className = "grid-header column-header";
       header.role = "columnheader";
       header.textContent = columnLabels[columnIndex] ?? "";
-      header.style.transform = `translate(${rowHeaderWidth + columnIndex * columnWidth}px, 0)`;
+      header.style.transform = `translate(${rowHeaderWidth + columnIndex * columnWidth}px, ${scrollTop}px)`;
       elements.grid.append(header);
     }
 
@@ -541,7 +542,7 @@ function initializeApp() {
       header.className = "grid-header row-header";
       header.role = "rowheader";
       header.textContent = String(rowIndex + 1);
-      header.style.transform = `translate(0, ${columnHeaderHeight + rowIndex * rowHeight}px)`;
+      header.style.transform = `translate(${scrollLeft}px, ${columnHeaderHeight + rowIndex * rowHeight}px)`;
       elements.grid.append(header);
 
       for (let columnIndex = firstColumn; columnIndex <= lastColumn; columnIndex += 1) {

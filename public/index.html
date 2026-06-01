@@ -27,9 +27,18 @@
               <span class="save-state" id="save-state" role="status">Saved locally</span>
             </div>
             <div class="sheet-actions" id="downloads" aria-label="Downloads and sheet actions">
-              <button class="button secondary" id="download-csv" type="button">Download CSV</button>
-              <button class="button secondary" id="download-json" type="button">Download JSON</button>
-              <button class="button danger" id="clear-sheet" type="button">Clear sheet</button>
+              <button class="button secondary icon-button csv-icon" id="download-csv" type="button" aria-label="Download CSV" title="Download CSV">
+                <span class="button-icon" aria-hidden="true"></span>
+                <span class="sr-only">Download CSV</span>
+              </button>
+              <button class="button secondary icon-button json-icon" id="download-json" type="button" aria-label="Download JSON" title="Download JSON">
+                <span class="button-icon" aria-hidden="true"></span>
+                <span class="sr-only">Download JSON</span>
+              </button>
+              <button class="button danger icon-button clear-icon" id="clear-sheet" type="button" aria-label="Clear sheet" title="Clear sheet">
+                <span class="button-icon" aria-hidden="true"></span>
+                <span class="sr-only">Clear sheet</span>
+              </button>
             </div>
           </div>
 
