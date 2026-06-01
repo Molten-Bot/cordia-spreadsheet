@@ -1,6 +1,6 @@
 # Spreadsheet
 
-Static browser-only spreadsheet that stores one working sheet in browser local storage and exports CSV or JSON files.
+Static browser-only 1024 x 1024 spreadsheet that stores one working sheet in browser local storage, evaluates basic formulas, and exports CSV or JSON files.
 
 ## Structure
 

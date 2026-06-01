@@ -6,6 +6,7 @@ import {
   clearSheet,
   countFilledCells,
   createDefaultState,
+  evaluateCell,
   parseStoredState,
   toCsv,
   toJson,
@@ -15,9 +16,9 @@ import {
 test("createDefaultState seeds a fixed spreadsheet", () => {
   const state = createDefaultState();
 
-  assert.equal(state.cells.length, 24);
-  assert.equal(state.cells[0].length, 8);
-  assert.deepEqual(state.cells[0], [
+  assert.equal(state.cells.length, 1024);
+  assert.equal(state.cells[0].length, 1024);
+  assert.deepEqual(state.cells[0].slice(0, 8), [
     "Project",
     "Owner",
     "Status",
@@ -39,7 +40,8 @@ test("parseStoredState normalizes stored spreadsheet cells", () => {
 
   assert.deepEqual(parsed.cells[0].slice(0, 3), ["Name", "", ""]);
   assert.deepEqual(parsed.cells[1].slice(0, 3), ["Alpha", "Ready", "Ignored extra"]);
-  assert.equal(parsed.cells.length, 24);
+  assert.equal(parsed.cells.length, 1024);
+  assert.equal(parsed.cells[0].length, 1024);
 });
 
 test("parseStoredState falls back when stored JSON is invalid", () => {
@@ -56,6 +58,19 @@ test("cell reducers update and clear immutably", () => {
   assert.equal(updated.cells[4][2], "Blocked");
   assert.equal(state.cells[4][2], "");
   assert.equal(countFilledCells(cleared), 0);
+});
+
+test("formulas evaluate arithmetic, references, and range functions", () => {
+  let state = clearSheet(createDefaultState());
+  state = updateCell(state, 0, 0, "10");
+  state = updateCell(state, 1, 0, "15");
+  state = updateCell(state, 0, 1, "=A1+A2*2");
+  state = updateCell(state, 1, 1, "=SUM(A1:A2)");
+  state = updateCell(state, 2, 1, "=AVERAGE(A1:A2, 5)");
+
+  assert.equal(evaluateCell(state, 0, 1), "40");
+  assert.equal(evaluateCell(state, 1, 1), "25");
+  assert.equal(evaluateCell(state, 2, 1), "10");
 });
 
 test("exports CSV and JSON downloads from sheet state", () => {
