@@ -388,8 +388,12 @@ function getElement(selector, type) {
 }
 function getElements() {
     return {
+        cellEditorInput: getElement("#cell-editor-input", HTMLInputElement),
+        cellEditorLabel: getElement("#cell-editor-label", HTMLElement),
         cellCount: getElement("#cell-count", HTMLElement),
+        clearSheetDialog: getElement("#clear-sheet-dialog", HTMLDialogElement),
         clearSheetButton: getElement("#clear-sheet", HTMLButtonElement),
+        confirmClearSheetButton: getElement("#confirm-clear-sheet", HTMLButtonElement),
         downloadCsvButton: getElement("#download-csv", HTMLButtonElement),
         downloadJsonButton: getElement("#download-json", HTMLButtonElement),
         grid: getElement("#spreadsheet-grid", HTMLElement),
@@ -414,6 +418,7 @@ function initializeApp() {
     const elements = getElements();
     let state = parseStoredState(localStorage.getItem(storageKey), defaultState);
     let saveTimer;
+    let selectedCell = { rowIndex: 0, columnIndex: 0 };
     function saveState() {
         try {
             localStorage.setItem(storageKey, JSON.stringify(state));
@@ -427,6 +432,47 @@ function initializeApp() {
         saveTimer = window.setTimeout(() => {
             elements.saveState.textContent = "Autosaved in this browser";
         }, 1600);
+    }
+    function updateCellEditor() {
+        elements.cellEditorLabel.textContent = cellAddress(selectedCell.rowIndex, selectedCell.columnIndex);
+        elements.cellEditorInput.value = state.cells[selectedCell.rowIndex]?.[selectedCell.columnIndex] ?? "";
+    }
+    function selectCell(rowIndex, columnIndex, input) {
+        selectedCell = { rowIndex, columnIndex };
+        updateCellEditor();
+        elements.grid.querySelector(".grid-cell.selected")?.classList.remove("selected");
+        input?.closest(".grid-cell")?.classList.add("selected");
+    }
+    function focusCell(rowIndex, columnIndex) {
+        selectedCell = {
+            rowIndex: Math.max(0, Math.min(rowCount - 1, rowIndex)),
+            columnIndex: Math.max(0, Math.min(columnCount - 1, columnIndex)),
+        };
+        const cellLeft = rowHeaderWidth + selectedCell.columnIndex * columnWidth;
+        const cellTop = columnHeaderHeight + selectedCell.rowIndex * rowHeight;
+        const viewportLeft = elements.sheetWrap.scrollLeft;
+        const viewportTop = elements.sheetWrap.scrollTop;
+        const viewportRight = viewportLeft + elements.sheetWrap.clientWidth;
+        const viewportBottom = viewportTop + elements.sheetWrap.clientHeight;
+        if (cellLeft < viewportLeft + rowHeaderWidth) {
+            elements.sheetWrap.scrollLeft = Math.max(0, cellLeft - rowHeaderWidth);
+        }
+        else if (cellLeft + columnWidth > viewportRight) {
+            elements.sheetWrap.scrollLeft = cellLeft + columnWidth - elements.sheetWrap.clientWidth;
+        }
+        if (cellTop < viewportTop + columnHeaderHeight) {
+            elements.sheetWrap.scrollTop = Math.max(0, cellTop - columnHeaderHeight);
+        }
+        else if (cellTop + rowHeight > viewportBottom) {
+            elements.sheetWrap.scrollTop = cellTop + rowHeight - elements.sheetWrap.clientHeight;
+        }
+        renderGrid();
+        updateCellEditor();
+        window.requestAnimationFrame(() => {
+            const input = elements.grid.querySelector(`input[data-row="${selectedCell.rowIndex}"][data-column="${selectedCell.columnIndex}"]`);
+            input?.focus();
+            input?.select();
+        });
     }
     function renderGrid() {
         elements.grid.replaceChildren();
@@ -465,17 +511,31 @@ function initializeApp() {
                 const displayValue = cell.trim().startsWith("=") ? evaluateCell(state, rowIndex, columnIndex) : cell;
                 const cellShell = document.createElement("div");
                 cellShell.className = "grid-cell";
+                if (selectedCell.rowIndex === rowIndex && selectedCell.columnIndex === columnIndex) {
+                    cellShell.classList.add("selected");
+                }
                 cellShell.role = "gridcell";
                 cellShell.style.transform = `translate(${rowHeaderWidth + columnIndex * columnWidth}px, ${columnHeaderHeight + rowIndex * rowHeight}px)`;
                 const input = document.createElement("input");
                 input.value = displayValue;
                 input.ariaLabel = `${columnLabels[columnIndex]}${rowIndex + 1}`;
+                input.dataset.row = String(rowIndex);
+                input.dataset.column = String(columnIndex);
                 input.title = cell.trim().startsWith("=") ? cell : displayValue;
+                input.addEventListener("focus", () => {
+                    selectCell(rowIndex, columnIndex, input);
+                });
                 if (cell.trim().startsWith("=")) {
                     input.addEventListener("focus", () => {
                         input.value = state.cells[rowIndex]?.[columnIndex] ?? "";
                     });
                 }
+                input.addEventListener("keydown", (event) => {
+                    if (event.key !== "Enter")
+                        return;
+                    event.preventDefault();
+                    focusCell(rowIndex + 1, columnIndex);
+                });
                 input.addEventListener("blur", () => {
                     if (cell.trim().startsWith("=") || input.value.trim().startsWith("=")) {
                         renderGrid();
@@ -483,6 +543,9 @@ function initializeApp() {
                 });
                 input.addEventListener("input", () => {
                     state = updateCell(state, rowIndex, columnIndex, input.value);
+                    if (selectedCell.rowIndex === rowIndex && selectedCell.columnIndex === columnIndex) {
+                        elements.cellEditorInput.value = input.value;
+                    }
                     saveState();
                     renderFooter();
                 });
@@ -498,6 +561,7 @@ function initializeApp() {
     function render() {
         renderGrid();
         renderFooter();
+        updateCellEditor();
     }
     function updateCurrentNavLink() {
         const currentHash = window.location.hash || "#sheet";
@@ -506,9 +570,24 @@ function initializeApp() {
         });
     }
     elements.clearSheetButton.addEventListener("click", () => {
+        elements.clearSheetDialog.showModal();
+    });
+    elements.confirmClearSheetButton.addEventListener("click", () => {
         state = clearSheet(state);
+        selectedCell = { rowIndex: 0, columnIndex: 0 };
         saveState();
         render();
+    });
+    elements.cellEditorInput.addEventListener("input", () => {
+        state = updateCell(state, selectedCell.rowIndex, selectedCell.columnIndex, elements.cellEditorInput.value);
+        saveState();
+        render();
+    });
+    elements.cellEditorInput.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter")
+            return;
+        event.preventDefault();
+        focusCell(selectedCell.rowIndex + 1, selectedCell.columnIndex);
     });
     elements.downloadCsvButton.addEventListener("click", () => {
         downloadFile("spreadsheet.csv", toCsv(state), "text/csv");
