@@ -156,6 +156,8 @@ interface CellReference {
   rowIndex: number;
 }
 
+type FormulaValue = number | string;
+
 function parseCellReference(reference: string): CellReference | undefined {
   const match = /^([A-Z]+)(\d+)$/i.exec(reference.trim());
   if (!match) return undefined;
@@ -181,7 +183,12 @@ function numericCellValue(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function formatFormulaResult(value: number): string {
+function formulaValueAsNumber(value: FormulaValue): number {
+  return typeof value === "number" ? value : numericCellValue(value);
+}
+
+function formatFormulaResult(value: FormulaValue): string {
+  if (typeof value === "string") return value;
   if (!Number.isFinite(value)) return "#ERROR";
   return Number.parseFloat(value.toFixed(10)).toString();
 }
@@ -203,7 +210,7 @@ function evaluateCellValue(state: AppState, rowIndex: number, columnIndex: numbe
   return formatFormulaResult(result);
 }
 
-function evaluateFormulaValue(state: AppState, expression: string, seen: Set<string>): number {
+function evaluateFormulaValue(state: AppState, expression: string, seen: Set<string>): FormulaValue {
   let index = 0;
 
   function skipWhitespace() {
@@ -235,13 +242,13 @@ function evaluateFormulaValue(state: AppState, expression: string, seen: Set<str
     return parseCellReference(`${firstLetters}${expression.slice(start, index)}`);
   }
 
-  function getReferenceValue(reference: CellReference): number {
+  function getReferenceValue(reference: CellReference): FormulaValue {
     const value = evaluateCellValue(state, reference.rowIndex, reference.columnIndex, seen);
     if (value === "#CYCLE") throw new Error("Cycle");
-    return numericCellValue(value);
+    return value;
   }
 
-  function readRange(firstReference: CellReference): number[] | undefined {
+  function readRange(firstReference: CellReference): FormulaValue[] | undefined {
     skipWhitespace();
     if (expression[index] !== ":") return undefined;
 
@@ -254,7 +261,7 @@ function evaluateFormulaValue(state: AppState, expression: string, seen: Set<str
     const maxRow = Math.max(firstReference.rowIndex, secondReference.rowIndex);
     const minColumn = Math.min(firstReference.columnIndex, secondReference.columnIndex);
     const maxColumn = Math.max(firstReference.columnIndex, secondReference.columnIndex);
-    const values: number[] = [];
+    const values: FormulaValue[] = [];
 
     for (let rowIndex = minRow; rowIndex <= maxRow; rowIndex += 1) {
       for (let columnIndex = minColumn; columnIndex <= maxColumn; columnIndex += 1) {
@@ -265,7 +272,7 @@ function evaluateFormulaValue(state: AppState, expression: string, seen: Set<str
     return values;
   }
 
-  function parseArgument(): number[] {
+  function parseArgument(): FormulaValue[] {
     skipWhitespace();
     const start = index;
     const letters = readLetters();
@@ -282,12 +289,12 @@ function evaluateFormulaValue(state: AppState, expression: string, seen: Set<str
     return [parseExpression()];
   }
 
-  function parseFunction(name: string): number {
+  function parseFunction(name: string): FormulaValue {
     skipWhitespace();
     if (expression[index] !== "(") throw new Error("Missing function arguments");
     index += 1;
 
-    const values: number[] = [];
+    const values: FormulaValue[] = [];
     skipWhitespace();
     if (expression[index] !== ")") {
       while (index < expression.length) {
@@ -304,19 +311,23 @@ function evaluateFormulaValue(state: AppState, expression: string, seen: Set<str
 
     switch (name) {
       case "SUM":
-        return values.reduce((total, value) => total + value, 0);
+        return values.reduce<number>((total, value) => total + formulaValueAsNumber(value), 0);
       case "AVERAGE":
-        return values.length ? values.reduce((total, value) => total + value, 0) / values.length : 0;
+        return values.length
+          ? values.reduce<number>((total, value) => total + formulaValueAsNumber(value), 0) / values.length
+          : 0;
       case "MIN":
-        return values.length ? Math.min(...values) : 0;
+        return values.length ? Math.min(...values.map(formulaValueAsNumber)) : 0;
       case "MAX":
-        return values.length ? Math.max(...values) : 0;
+        return values.length ? Math.max(...values.map(formulaValueAsNumber)) : 0;
+      case "CONCAT":
+        return values.join("");
       default:
         throw new Error("Unknown function");
     }
   }
 
-  function parsePrimary(): number {
+  function parsePrimary(): FormulaValue {
     skipWhitespace();
 
     if (expression[index] === "(") {
@@ -341,22 +352,22 @@ function evaluateFormulaValue(state: AppState, expression: string, seen: Set<str
     throw new Error("Invalid formula");
   }
 
-  function parseUnary(): number {
+  function parseUnary(): FormulaValue {
     skipWhitespace();
     if (expression[index] === "-") {
       index += 1;
-      return -parseUnary();
+      return -formulaValueAsNumber(parseUnary());
     }
 
     if (expression[index] === "+") {
       index += 1;
-      return parseUnary();
+      return formulaValueAsNumber(parseUnary());
     }
 
     return parsePrimary();
   }
 
-  function parseTerm(): number {
+  function parseTerm(): FormulaValue {
     let value = parseUnary();
 
     while (index < expression.length) {
@@ -365,13 +376,16 @@ function evaluateFormulaValue(state: AppState, expression: string, seen: Set<str
       if (operator !== "*" && operator !== "/") break;
       index += 1;
       const right = parseUnary();
-      value = operator === "*" ? value * right : value / right;
+      value =
+        operator === "*"
+          ? formulaValueAsNumber(value) * formulaValueAsNumber(right)
+          : formulaValueAsNumber(value) / formulaValueAsNumber(right);
     }
 
     return value;
   }
 
-  function parseExpression(): number {
+  function parseExpression(): FormulaValue {
     let value = parseTerm();
 
     while (index < expression.length) {
@@ -380,7 +394,10 @@ function evaluateFormulaValue(state: AppState, expression: string, seen: Set<str
       if (operator !== "+" && operator !== "-") break;
       index += 1;
       const right = parseTerm();
-      value = operator === "+" ? value + right : value - right;
+      value =
+        operator === "+"
+          ? formulaValueAsNumber(value) + formulaValueAsNumber(right)
+          : formulaValueAsNumber(value) - formulaValueAsNumber(right);
     }
 
     return value;
@@ -560,6 +577,67 @@ function initializeApp() {
     });
   }
 
+  function moveSelectionForKey(event: KeyboardEvent, rowIndex: number, columnIndex: number): boolean {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
+
+    switch (event.key) {
+      case "ArrowUp":
+        focusCell(rowIndex - 1, columnIndex);
+        return true;
+      case "ArrowDown":
+        focusCell(rowIndex + 1, columnIndex);
+        return true;
+      case "ArrowLeft":
+        focusCell(rowIndex, columnIndex - 1);
+        return true;
+      case "ArrowRight":
+        focusCell(rowIndex, columnIndex + 1);
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  function pasteCellValue(rowIndex: number, columnIndex: number, input: HTMLInputElement, value: string) {
+    state = updateCell(state, rowIndex, columnIndex, value);
+    const cellValue = state.cells[rowIndex]?.[columnIndex] ?? "";
+    input.value = cellValue;
+    if (selectedCell.rowIndex === rowIndex && selectedCell.columnIndex === columnIndex) {
+      elements.cellEditorInput.value = cellValue;
+    }
+    saveState();
+    renderFooter();
+    renderGrid();
+  }
+
+  function handleClipboardShortcut(
+    event: KeyboardEvent,
+    rowIndex: number,
+    columnIndex: number,
+    input: HTMLInputElement,
+  ): boolean {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return false;
+
+    const key = event.key.toLowerCase();
+    if (key === "c") {
+      if (!navigator.clipboard?.writeText) return false;
+      event.preventDefault();
+      void navigator.clipboard.writeText(state.cells[rowIndex]?.[columnIndex] ?? "").catch(() => undefined);
+      return true;
+    }
+
+    if (key === "v") {
+      if (!navigator.clipboard?.readText) return false;
+      event.preventDefault();
+      void navigator.clipboard.readText().then((value) => {
+        pasteCellValue(rowIndex, columnIndex, input, value);
+      }).catch(() => undefined);
+      return true;
+    }
+
+    return false;
+  }
+
   function renderGrid() {
     elements.grid.replaceChildren();
     elements.grid.style.width = `${rowHeaderWidth + columnCount * columnWidth}px`;
@@ -630,13 +708,20 @@ function initializeApp() {
           });
         }
         input.addEventListener("keydown", (event) => {
+          if (handleClipboardShortcut(event, rowIndex, columnIndex, input)) return;
+
+          if (moveSelectionForKey(event, rowIndex, columnIndex)) {
+            event.preventDefault();
+            return;
+          }
+
           if (event.key !== "Enter") return;
           event.preventDefault();
           focusCell(rowIndex + 1, columnIndex);
         });
         input.addEventListener("blur", () => {
           if (cell.trim().startsWith("=") || input.value.trim().startsWith("=")) {
-            renderGrid();
+            window.requestAnimationFrame(renderGrid);
           }
         });
         input.addEventListener("input", () => {
@@ -689,6 +774,22 @@ function initializeApp() {
   });
 
   elements.cellEditorInput.addEventListener("keydown", (event) => {
+    if (
+      handleClipboardShortcut(
+        event,
+        selectedCell.rowIndex,
+        selectedCell.columnIndex,
+        elements.cellEditorInput,
+      )
+    ) {
+      return;
+    }
+
+    if (moveSelectionForKey(event, selectedCell.rowIndex, selectedCell.columnIndex)) {
+      event.preventDefault();
+      return;
+    }
+
     if (event.key !== "Enter") return;
     event.preventDefault();
     focusCell(selectedCell.rowIndex + 1, selectedCell.columnIndex);

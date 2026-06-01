@@ -136,7 +136,12 @@ function numericCellValue(value) {
     const parsed = Number(normalized);
     return Number.isFinite(parsed) ? parsed : 0;
 }
+function formulaValueAsNumber(value) {
+    return typeof value === "number" ? value : numericCellValue(value);
+}
 function formatFormulaResult(value) {
+    if (typeof value === "string")
+        return value;
     if (!Number.isFinite(value))
         return "#ERROR";
     return Number.parseFloat(value.toFixed(10)).toString();
@@ -193,7 +198,7 @@ function evaluateFormulaValue(state, expression, seen) {
         const value = evaluateCellValue(state, reference.rowIndex, reference.columnIndex, seen);
         if (value === "#CYCLE")
             throw new Error("Cycle");
-        return numericCellValue(value);
+        return value;
     }
     function readRange(firstReference) {
         skipWhitespace();
@@ -254,13 +259,17 @@ function evaluateFormulaValue(state, expression, seen) {
         index += 1;
         switch (name) {
             case "SUM":
-                return values.reduce((total, value) => total + value, 0);
+                return values.reduce((total, value) => total + formulaValueAsNumber(value), 0);
             case "AVERAGE":
-                return values.length ? values.reduce((total, value) => total + value, 0) / values.length : 0;
+                return values.length
+                    ? values.reduce((total, value) => total + formulaValueAsNumber(value), 0) / values.length
+                    : 0;
             case "MIN":
-                return values.length ? Math.min(...values) : 0;
+                return values.length ? Math.min(...values.map(formulaValueAsNumber)) : 0;
             case "MAX":
-                return values.length ? Math.max(...values) : 0;
+                return values.length ? Math.max(...values.map(formulaValueAsNumber)) : 0;
+            case "CONCAT":
+                return values.join("");
             default:
                 throw new Error("Unknown function");
         }
@@ -292,11 +301,11 @@ function evaluateFormulaValue(state, expression, seen) {
         skipWhitespace();
         if (expression[index] === "-") {
             index += 1;
-            return -parseUnary();
+            return -formulaValueAsNumber(parseUnary());
         }
         if (expression[index] === "+") {
             index += 1;
-            return parseUnary();
+            return formulaValueAsNumber(parseUnary());
         }
         return parsePrimary();
     }
@@ -309,7 +318,10 @@ function evaluateFormulaValue(state, expression, seen) {
                 break;
             index += 1;
             const right = parseUnary();
-            value = operator === "*" ? value * right : value / right;
+            value =
+                operator === "*"
+                    ? formulaValueAsNumber(value) * formulaValueAsNumber(right)
+                    : formulaValueAsNumber(value) / formulaValueAsNumber(right);
         }
         return value;
     }
@@ -322,7 +334,10 @@ function evaluateFormulaValue(state, expression, seen) {
                 break;
             index += 1;
             const right = parseTerm();
-            value = operator === "+" ? value + right : value - right;
+            value =
+                operator === "+"
+                    ? formulaValueAsNumber(value) + formulaValueAsNumber(right)
+                    : formulaValueAsNumber(value) - formulaValueAsNumber(right);
         }
         return value;
     }
@@ -474,6 +489,59 @@ function initializeApp() {
             input?.select();
         });
     }
+    function moveSelectionForKey(event, rowIndex, columnIndex) {
+        if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey)
+            return false;
+        switch (event.key) {
+            case "ArrowUp":
+                focusCell(rowIndex - 1, columnIndex);
+                return true;
+            case "ArrowDown":
+                focusCell(rowIndex + 1, columnIndex);
+                return true;
+            case "ArrowLeft":
+                focusCell(rowIndex, columnIndex - 1);
+                return true;
+            case "ArrowRight":
+                focusCell(rowIndex, columnIndex + 1);
+                return true;
+            default:
+                return false;
+        }
+    }
+    function pasteCellValue(rowIndex, columnIndex, input, value) {
+        state = updateCell(state, rowIndex, columnIndex, value);
+        const cellValue = state.cells[rowIndex]?.[columnIndex] ?? "";
+        input.value = cellValue;
+        if (selectedCell.rowIndex === rowIndex && selectedCell.columnIndex === columnIndex) {
+            elements.cellEditorInput.value = cellValue;
+        }
+        saveState();
+        renderFooter();
+        renderGrid();
+    }
+    function handleClipboardShortcut(event, rowIndex, columnIndex, input) {
+        if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey)
+            return false;
+        const key = event.key.toLowerCase();
+        if (key === "c") {
+            if (!navigator.clipboard?.writeText)
+                return false;
+            event.preventDefault();
+            void navigator.clipboard.writeText(state.cells[rowIndex]?.[columnIndex] ?? "").catch(() => undefined);
+            return true;
+        }
+        if (key === "v") {
+            if (!navigator.clipboard?.readText)
+                return false;
+            event.preventDefault();
+            void navigator.clipboard.readText().then((value) => {
+                pasteCellValue(rowIndex, columnIndex, input, value);
+            }).catch(() => undefined);
+            return true;
+        }
+        return false;
+    }
     function renderGrid() {
         elements.grid.replaceChildren();
         elements.grid.style.width = `${rowHeaderWidth + columnCount * columnWidth}px`;
@@ -531,6 +599,12 @@ function initializeApp() {
                     });
                 }
                 input.addEventListener("keydown", (event) => {
+                    if (handleClipboardShortcut(event, rowIndex, columnIndex, input))
+                        return;
+                    if (moveSelectionForKey(event, rowIndex, columnIndex)) {
+                        event.preventDefault();
+                        return;
+                    }
                     if (event.key !== "Enter")
                         return;
                     event.preventDefault();
@@ -538,7 +612,7 @@ function initializeApp() {
                 });
                 input.addEventListener("blur", () => {
                     if (cell.trim().startsWith("=") || input.value.trim().startsWith("=")) {
-                        renderGrid();
+                        window.requestAnimationFrame(renderGrid);
                     }
                 });
                 input.addEventListener("input", () => {
@@ -584,6 +658,13 @@ function initializeApp() {
         render();
     });
     elements.cellEditorInput.addEventListener("keydown", (event) => {
+        if (handleClipboardShortcut(event, selectedCell.rowIndex, selectedCell.columnIndex, elements.cellEditorInput)) {
+            return;
+        }
+        if (moveSelectionForKey(event, selectedCell.rowIndex, selectedCell.columnIndex)) {
+            event.preventDefault();
+            return;
+        }
         if (event.key !== "Enter")
             return;
         event.preventDefault();
