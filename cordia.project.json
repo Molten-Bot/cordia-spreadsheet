@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "generatedBy": "cordia",
+  "updatedAt": "2026-06-01T03:33:38.875Z",
+  "project": {
+    "id": "spreadsheet",
+    "handle": "spreadsheet",
+    "title": "Spreadsheet",
+    "summary": "This is a single spreadsheet, that is available for anyone to use. It will only store the one working spreadsheet in local storage of the browser, and will be full screen, and allow for .csv and .json downloads.",
+    "url": "https://cordia.molten.bot/project/spreadsheet"
+  },
+  "repo": {
+    "owner": "Molten-Bot",
+    "name": "cordia-spreadsheet",
+    "fullName": "Molten-Bot/cordia-spreadsheet"
+  }
+}
