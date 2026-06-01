@@ -73,6 +73,17 @@ test("formulas evaluate arithmetic, references, and range functions", () => {
   assert.equal(evaluateCell(state, 2, 1), "10");
 });
 
+test("formulas concatenate string cell contents", () => {
+  let state = clearSheet(createDefaultState());
+  state = updateCell(state, 7, 4, "Hello");
+  state = updateCell(state, 7, 5, " world");
+  state = updateCell(state, 7, 6, "=CONCAT(E8,F8)");
+  state = updateCell(state, 8, 6, "=CONCAT(E8:F8)");
+
+  assert.equal(evaluateCell(state, 7, 6), "Hello world");
+  assert.equal(evaluateCell(state, 8, 6), "Hello world");
+});
+
 test("exports CSV and JSON downloads from the used sheet range", () => {
   const state = {
     cells: [
