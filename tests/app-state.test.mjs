@@ -3,66 +3,75 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
-  addItem,
-  clearDoneItems,
+  clearSheet,
+  countFilledCells,
   createDefaultState,
   parseStoredState,
-  removeItem,
-  updateItem,
+  toCsv,
+  toJson,
+  updateCell,
 } from "../public/app.js";
 
-test("createDefaultState uses supplied id factory", () => {
-  let nextId = 1;
-  const state = createDefaultState(() => `item-${nextId++}`);
+test("createDefaultState seeds a fixed spreadsheet", () => {
+  const state = createDefaultState();
 
-  assert.deepEqual(
-    state.items.map((item) => item.id),
-    ["item-1", "item-2", "item-3"],
-  );
+  assert.equal(state.cells.length, 24);
+  assert.equal(state.cells[0].length, 8);
+  assert.deepEqual(state.cells[0], [
+    "Project",
+    "Owner",
+    "Status",
+    "Due",
+    "Budget",
+    "Notes",
+    "Priority",
+    "Updated",
+  ]);
 });
 
-test("parseStoredState merges valid stored values with defaults", () => {
-  const defaultState = createDefaultState(() => "default-id");
+test("parseStoredState normalizes stored spreadsheet cells", () => {
+  const defaultState = createDefaultState();
   const stored = JSON.stringify({
-    appName: "Typed Cordia",
-    theme: "dark",
-    items: [{ id: "stored-id", text: "Stored item", done: true }],
+    cells: [["Name", 42], ["Alpha", "Ready", "Ignored extra"]],
   });
 
-  assert.deepEqual(parseStoredState(stored, defaultState), {
-    appName: "Typed Cordia",
-    theme: "dark",
-    items: [{ id: "stored-id", text: "Stored item", done: true }],
-  });
+  const parsed = parseStoredState(stored, defaultState);
+
+  assert.deepEqual(parsed.cells[0].slice(0, 3), ["Name", "", ""]);
+  assert.deepEqual(parsed.cells[1].slice(0, 3), ["Alpha", "Ready", "Ignored extra"]);
+  assert.equal(parsed.cells.length, 24);
 });
 
 test("parseStoredState falls back when stored JSON is invalid", () => {
-  const defaultState = createDefaultState(() => "default-id");
+  const defaultState = createDefaultState();
 
   assert.equal(parseStoredState("{", defaultState), defaultState);
 });
 
-test("item reducers add, update, remove, and clear items immutably", () => {
+test("cell reducers update and clear immutably", () => {
+  const state = createDefaultState();
+  const updated = updateCell(state, 4, 2, "Blocked");
+  const cleared = clearSheet(updated);
+
+  assert.equal(updated.cells[4][2], "Blocked");
+  assert.equal(state.cells[4][2], "");
+  assert.equal(countFilledCells(cleared), 0);
+});
+
+test("exports CSV and JSON downloads from sheet state", () => {
   const state = {
-    appName: "Cordia",
-    theme: "system",
-    items: [
-      { id: "one", text: "One", done: false },
-      { id: "two", text: "Two", done: true },
+    cells: [
+      ["Name", "Note"],
+      ["Alpha", "Needs, quote"],
+      ["Beta", "Line\nbreak"],
     ],
   };
 
-  const added = addItem(state, "Three", () => "three");
-  const updated = updateItem(added, "one", { done: true });
-  const removed = removeItem(updated, "two");
-  const cleared = clearDoneItems(removed);
-
-  assert.deepEqual(added.items[0], { id: "three", text: "Three", done: false });
-  assert.equal(state.items[0].done, false);
-  assert.deepEqual(
-    cleared.items,
-    [{ id: "three", text: "Three", done: false }],
-  );
+  assert.equal(toCsv(state), 'Name,Note\nAlpha,"Needs, quote"\nBeta,"Line\nbreak"');
+  assert.deepEqual(JSON.parse(toJson(state)).rows[0], {
+    Name: "Alpha",
+    Note: "Needs, quote",
+  });
 });
 
 test("served files do not reference disallowed providers or tooling", async () => {

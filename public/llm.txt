@@ -1,6 +1,6 @@
-# Cordia App Template
+# Spreadsheet
 
-Cordia App Template is a static browser-only web application template ready for static hosting.
+Spreadsheet is a static browser-only app for editing one working spreadsheet. Data is stored in local browser storage. The app can download the sheet as CSV or JSON.
 
 Creator: cordia.molten.bot
 Creator URL: https://cordia.molten.bot

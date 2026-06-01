@@ -1,10 +1,10 @@
-# Cordia Web Blank
+# Spreadsheet
 
-Static browser-only web app template for fast downstream customization.
+Static browser-only spreadsheet that stores one working sheet in browser local storage and exports CSV or JSON files.
 
 ## Structure
 
-- `public/index.html` - app markup and deploy entry point
+- `public/index.html` - spreadsheet markup and deploy entry point
 - `public/global.css` - global styling
 - `src/app.ts` - typed browser-only application source
 - `public/app.js` - compiled browser application logic
@@ -30,4 +30,4 @@ Use these project settings:
 - Build command: `npm run build`
 - Build output directory: `public`
 
-This template does not require bundling or server functions.
+Spreadsheet does not require bundling, server functions, accounts, or a database.
