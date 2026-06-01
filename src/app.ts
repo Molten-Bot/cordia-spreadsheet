@@ -25,6 +25,8 @@ interface AppElements {
   downloadCsvButton: HTMLButtonElement;
   downloadJsonButton: HTMLButtonElement;
   grid: HTMLElement;
+  importFileInput: HTMLInputElement;
+  importSheetButton: HTMLButtonElement;
   navLinks: NodeListOf<HTMLAnchorElement>;
   saveState: HTMLElement;
   sheetWrap: HTMLElement;
@@ -110,13 +112,28 @@ function normalizeCell(value: unknown): string {
   return typeof value === "string" ? value.slice(0, 200) : "";
 }
 
+function normalizeImportedCell(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value.slice(0, 200);
+  if (typeof value === "number" || typeof value === "boolean") return String(value).slice(0, 200);
+  return "";
+}
+
 function normalizeRows(value: unknown, defaultState: AppState): string[][] {
   if (!Array.isArray(value)) return defaultState.cells;
 
+  return rowsToSheet(value);
+}
+
+function rowsToSheet(
+  rows: unknown[],
+  fallbackCells = createEmptyRows(),
+  normalizeValue: (value: unknown) => string = normalizeCell,
+): string[][] {
   return createEmptyRows().map((row, rowIndex) => {
-    const storedRow = value[rowIndex];
-    if (!Array.isArray(storedRow)) return row;
-    return row.map((_, columnIndex) => normalizeCell(storedRow[columnIndex]));
+    const storedRow = rows[rowIndex];
+    if (!Array.isArray(storedRow)) return fallbackCells[rowIndex] ?? row;
+    return row.map((_, columnIndex) => normalizeValue(storedRow[columnIndex]));
   });
 }
 
@@ -157,6 +174,12 @@ interface CellReference {
 }
 
 type FormulaValue = number | string;
+interface FormulaRange {
+  columnCount: number;
+  rowCount: number;
+  values: FormulaValue[];
+}
+type FormulaArgument = FormulaValue | FormulaRange;
 
 function parseCellReference(reference: string): CellReference | undefined {
   const match = /^([A-Z]+)(\d+)$/i.exec(reference.trim());
@@ -185,6 +208,28 @@ function numericCellValue(value: string): number {
 
 function formulaValueAsNumber(value: FormulaValue): number {
   return typeof value === "number" ? value : numericCellValue(value);
+}
+
+function formulaValueAsText(value: FormulaValue): string {
+  return typeof value === "number" ? formatFormulaResult(value) : value;
+}
+
+function compareFormulaValues(left: FormulaValue, right: FormulaValue): number {
+  const leftNumber = formulaValueAsNumber(left);
+  const rightNumber = formulaValueAsNumber(right);
+  if (leftNumber || rightNumber || formulaValueAsText(left).trim() === "0" || formulaValueAsText(right).trim() === "0") {
+    return leftNumber - rightNumber;
+  }
+  return formulaValueAsText(left).localeCompare(formulaValueAsText(right), undefined, { sensitivity: "base" });
+}
+
+function flattenFormulaArguments(values: FormulaArgument[]): FormulaValue[] {
+  return values.flatMap((value) => (typeof value === "object" ? value.values : [value]));
+}
+
+function formulaArgumentAsValue(value: FormulaArgument | undefined): FormulaValue {
+  if (value === undefined) return "";
+  return typeof value === "object" ? value.values[0] ?? "" : value;
 }
 
 function formatFormulaResult(value: FormulaValue): string {
@@ -228,6 +273,29 @@ function evaluateFormulaValue(state: AppState, expression: string, seen: Set<str
     return value;
   }
 
+  function readString(): string | undefined {
+    skipWhitespace();
+    const quote = expression[index];
+    if (quote !== "\"" && quote !== "'") return undefined;
+    index += 1;
+    let value = "";
+    while (index < expression.length) {
+      const char = expression[index] ?? "";
+      if (char === quote) {
+        if (expression[index + 1] === quote) {
+          value += quote;
+          index += 2;
+          continue;
+        }
+        index += 1;
+        return value;
+      }
+      value += char;
+      index += 1;
+    }
+    throw new Error("Unclosed string");
+  }
+
   function readLetters(): string {
     skipWhitespace();
     const start = index;
@@ -248,7 +316,7 @@ function evaluateFormulaValue(state: AppState, expression: string, seen: Set<str
     return value;
   }
 
-  function readRange(firstReference: CellReference): FormulaValue[] | undefined {
+  function readRange(firstReference: CellReference): FormulaRange | undefined {
     skipWhitespace();
     if (expression[index] !== ":") return undefined;
 
@@ -269,10 +337,14 @@ function evaluateFormulaValue(state: AppState, expression: string, seen: Set<str
       }
     }
 
-    return values;
+    return {
+      columnCount: maxColumn - minColumn + 1,
+      rowCount: maxRow - minRow + 1,
+      values,
+    };
   }
 
-  function parseArgument(): FormulaValue[] {
+  function parseArgument(): FormulaArgument {
     skipWhitespace();
     const start = index;
     const letters = readLetters();
@@ -281,12 +353,11 @@ function evaluateFormulaValue(state: AppState, expression: string, seen: Set<str
       if (reference) {
         const range = readRange(reference);
         if (range) return range;
-        return [getReferenceValue(reference)];
       }
       index = start;
     }
 
-    return [parseExpression()];
+    return parseExpression();
   }
 
   function parseFunction(name: string): FormulaValue {
@@ -294,11 +365,11 @@ function evaluateFormulaValue(state: AppState, expression: string, seen: Set<str
     if (expression[index] !== "(") throw new Error("Missing function arguments");
     index += 1;
 
-    const values: FormulaValue[] = [];
+    const args: FormulaArgument[] = [];
     skipWhitespace();
     if (expression[index] !== ")") {
       while (index < expression.length) {
-        values.push(...parseArgument());
+        args.push(parseArgument());
         skipWhitespace();
         if (expression[index] !== ",") break;
         index += 1;
@@ -309,9 +380,16 @@ function evaluateFormulaValue(state: AppState, expression: string, seen: Set<str
     if (expression[index] !== ")") throw new Error("Unclosed function");
     index += 1;
 
+    const values = flattenFormulaArguments(args);
+
     switch (name) {
       case "SUM":
         return values.reduce<number>((total, value) => total + formulaValueAsNumber(value), 0);
+      case "COUNT":
+        return values.filter((value) => {
+          if (typeof value === "number") return Number.isFinite(value);
+          return value.trim() !== "" && Number.isFinite(Number(value.replaceAll(",", "").replace(/^\$/, "")));
+        }).length;
       case "AVERAGE":
         return values.length
           ? values.reduce<number>((total, value) => total + formulaValueAsNumber(value), 0) / values.length
@@ -320,8 +398,87 @@ function evaluateFormulaValue(state: AppState, expression: string, seen: Set<str
         return values.length ? Math.min(...values.map(formulaValueAsNumber)) : 0;
       case "MAX":
         return values.length ? Math.max(...values.map(formulaValueAsNumber)) : 0;
+      case "POWER":
+        return Math.pow(formulaValueAsNumber(values[0] ?? 0), formulaValueAsNumber(values[1] ?? 0));
+      case "CEILING":
+        return Math.ceil(formulaValueAsNumber(values[0] ?? 0) / formulaValueAsNumber(values[1] ?? 1)) * formulaValueAsNumber(values[1] ?? 1);
+      case "FLOOR":
+        return Math.floor(formulaValueAsNumber(values[0] ?? 0) / formulaValueAsNumber(values[1] ?? 1)) * formulaValueAsNumber(values[1] ?? 1);
       case "CONCAT":
-        return values.join("");
+        return values.map(formulaValueAsText).join("");
+      case "TRIM":
+        return formulaValueAsText(values[0] ?? "").trim().replace(/\s+/g, " ");
+      case "REPLACE": {
+        const text = formulaValueAsText(values[0] ?? "");
+        const start = Math.max(1, Math.trunc(formulaValueAsNumber(values[1] ?? 1)));
+        const length = Math.max(0, Math.trunc(formulaValueAsNumber(values[2] ?? 0)));
+        return `${text.slice(0, start - 1)}${formulaValueAsText(values[3] ?? "")}${text.slice(start - 1 + length)}`;
+      }
+      case "SUBSTITUTE":
+        return formulaValueAsText(values[0] ?? "").replaceAll(formulaValueAsText(values[1] ?? ""), formulaValueAsText(values[2] ?? ""));
+      case "LEFT":
+        return formulaValueAsText(values[0] ?? "").slice(0, Math.max(0, Math.trunc(formulaValueAsNumber(values[1] ?? 1))));
+      case "RIGHT": {
+        const text = formulaValueAsText(values[0] ?? "");
+        return text.slice(Math.max(0, text.length - Math.max(0, Math.trunc(formulaValueAsNumber(values[1] ?? 1)))));
+      }
+      case "MID": {
+        const text = formulaValueAsText(values[0] ?? "");
+        const start = Math.max(1, Math.trunc(formulaValueAsNumber(values[1] ?? 1)));
+        const length = Math.max(0, Math.trunc(formulaValueAsNumber(values[2] ?? 0)));
+        return text.slice(start - 1, start - 1 + length);
+      }
+      case "UPPER":
+        return formulaValueAsText(values[0] ?? "").toUpperCase();
+      case "LOWER":
+        return formulaValueAsText(values[0] ?? "").toLowerCase();
+      case "PROPER":
+        return formulaValueAsText(values[0] ?? "").toLowerCase().replace(/\b\p{L}/gu, (char) => char.toUpperCase());
+      case "NOW":
+        return new Date().toISOString();
+      case "TODAY":
+        return new Date().toISOString().slice(0, 10);
+      case "DATEDIF": {
+        const start = new Date(formulaValueAsText(values[0] ?? ""));
+        const end = new Date(formulaValueAsText(values[1] ?? ""));
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return Number.NaN;
+        const unit = formulaValueAsText(values[2] ?? "d").toLowerCase();
+        const days = Math.floor((end.getTime() - start.getTime()) / 86400000);
+        if (unit === "y") return end.getUTCFullYear() - start.getUTCFullYear();
+        if (unit === "m") return (end.getUTCFullYear() - start.getUTCFullYear()) * 12 + end.getUTCMonth() - start.getUTCMonth();
+        return days;
+      }
+      case "VLOOKUP": {
+        const table = args[1];
+        if (typeof table !== "object") return Number.NaN;
+        const lookup = formulaArgumentAsValue(args[0]);
+        const resultColumn = Math.trunc(formulaValueAsNumber(formulaArgumentAsValue(args[2]))) - 1;
+        const rangeLookup = formulaValueAsText(formulaArgumentAsValue(args[3])).toLowerCase() === "true";
+        let approximateMatch: FormulaValue = "#N/A";
+        for (let rowIndex = 0; rowIndex < table.rowCount; rowIndex += 1) {
+          const rowOffset = rowIndex * table.columnCount;
+          const comparison = compareFormulaValues(table.values[rowOffset] ?? "", lookup);
+          if (!rangeLookup && comparison === 0) return table.values[rowOffset + resultColumn] ?? "";
+          if (rangeLookup && comparison <= 0) approximateMatch = table.values[rowOffset + resultColumn] ?? "";
+        }
+        return approximateMatch;
+      }
+      case "HLOOKUP": {
+        const table = args[1];
+        if (typeof table !== "object") return Number.NaN;
+        const lookup = formulaArgumentAsValue(args[0]);
+        const resultRow = Math.trunc(formulaValueAsNumber(formulaArgumentAsValue(args[2]))) - 1;
+        const rangeLookup = formulaValueAsText(formulaArgumentAsValue(args[3])).toLowerCase() === "true";
+        let approximateMatch: FormulaValue = "#N/A";
+        for (let columnIndex = 0; columnIndex < table.columnCount; columnIndex += 1) {
+          const comparison = compareFormulaValues(table.values[columnIndex] ?? "", lookup);
+          if (!rangeLookup && comparison === 0) return table.values[resultRow * table.columnCount + columnIndex] ?? "";
+          if (rangeLookup && comparison <= 0) approximateMatch = table.values[resultRow * table.columnCount + columnIndex] ?? "";
+        }
+        return approximateMatch;
+      }
+      case "IF":
+        return formulaValueAsNumber(values[0] ?? 0) ? values[1] ?? "" : values[2] ?? "";
       default:
         throw new Error("Unknown function");
     }
@@ -342,10 +499,15 @@ function evaluateFormulaValue(state: AppState, expression: string, seen: Set<str
     const number = readNumber();
     if (number !== undefined) return number;
 
+    const string = readString();
+    if (string !== undefined) return string;
+
     const letters = readLetters();
     if (letters) {
       const reference = readCellReference(letters);
       if (reference) return getReferenceValue(reference);
+      if (letters === "TRUE") return 1;
+      if (letters === "FALSE") return 0;
       return parseFunction(letters);
     }
 
@@ -385,7 +547,7 @@ function evaluateFormulaValue(state: AppState, expression: string, seen: Set<str
     return value;
   }
 
-  function parseExpression(): FormulaValue {
+  function parseAdditive(): FormulaValue {
     let value = parseTerm();
 
     while (index < expression.length) {
@@ -398,6 +560,42 @@ function evaluateFormulaValue(state: AppState, expression: string, seen: Set<str
         operator === "+"
           ? formulaValueAsNumber(value) + formulaValueAsNumber(right)
           : formulaValueAsNumber(value) - formulaValueAsNumber(right);
+    }
+
+    return value;
+  }
+
+  function parseExpression(): FormulaValue {
+    let value = parseAdditive();
+
+    skipWhitespace();
+    const operator =
+      expression.slice(index, index + 2) === ">=" ||
+      expression.slice(index, index + 2) === "<=" ||
+      expression.slice(index, index + 2) === "<>"
+        ? expression.slice(index, index + 2)
+        : expression[index] === ">" || expression[index] === "<" || expression[index] === "="
+          ? expression[index]
+          : "";
+
+    if (operator) {
+      index += operator.length;
+      const right = parseAdditive();
+      const comparison = compareFormulaValues(value, right);
+      switch (operator) {
+        case ">":
+          return comparison > 0 ? 1 : 0;
+        case "<":
+          return comparison < 0 ? 1 : 0;
+        case ">=":
+          return comparison >= 0 ? 1 : 0;
+        case "<=":
+          return comparison <= 0 ? 1 : 0;
+        case "=":
+          return comparison === 0 ? 1 : 0;
+        case "<>":
+          return comparison !== 0 ? 1 : 0;
+      }
     }
 
     return value;
@@ -453,6 +651,76 @@ export function toJson(state: AppState): string {
   return JSON.stringify({ columns, cells, rows }, null, 2);
 }
 
+export function fromCsv(content: string): AppState {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let index = 0;
+  let inQuotes = false;
+
+  while (index < content.length) {
+    const char = content[index] ?? "";
+    if (inQuotes) {
+      if (char === "\"" && content[index + 1] === "\"") {
+        cell += "\"";
+        index += 2;
+        continue;
+      }
+      if (char === "\"") {
+        inQuotes = false;
+      } else {
+        cell += char;
+      }
+      index += 1;
+      continue;
+    }
+
+    if (char === "\"") {
+      inQuotes = true;
+    } else if (char === ",") {
+      row.push(cell);
+      cell = "";
+    } else if (char === "\n") {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+    } else if (char !== "\r") {
+      cell += char;
+    }
+    index += 1;
+  }
+
+  row.push(cell);
+  if (row.length > 1 || row[0] !== "" || content.endsWith(",")) rows.push(row);
+  return { cells: rowsToSheet(rows, createEmptyRows(), normalizeImportedCell) };
+}
+
+function jsonRowsToCells(value: unknown): unknown[] | undefined {
+  if (Array.isArray(value)) {
+    if (value.every((row) => Array.isArray(row))) return value;
+    if (value.every((row) => row && typeof row === "object" && !Array.isArray(row))) {
+      const keys = Array.from(new Set(value.flatMap((row) => Object.keys(row as Record<string, unknown>))));
+      return [keys, ...value.map((row) => keys.map((key) => (row as Record<string, unknown>)[key]))];
+    }
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (Array.isArray(record.cells)) return record.cells;
+    if (Array.isArray(record.rows)) return jsonRowsToCells(record.rows);
+  }
+
+  return undefined;
+}
+
+export function fromJson(content: string): AppState {
+  const parsed = JSON.parse(content) as unknown;
+  const rows = jsonRowsToCells(parsed);
+  if (!rows) throw new Error("JSON must contain rows or cells");
+  return { cells: rowsToSheet(rows, createEmptyRows(), normalizeImportedCell) };
+}
+
 function initializeGoogleAnalytics() {
   const googleTagScript = document.createElement("script");
   googleTagScript.async = true;
@@ -487,6 +755,8 @@ function getElements(): AppElements {
     downloadCsvButton: getElement("#download-csv", HTMLButtonElement),
     downloadJsonButton: getElement("#download-json", HTMLButtonElement),
     grid: getElement("#spreadsheet-grid", HTMLElement),
+    importFileInput: getElement("#import-file", HTMLInputElement),
+    importSheetButton: getElement("#import-sheet", HTMLButtonElement),
     navLinks: document.querySelectorAll<HTMLAnchorElement>(".nav a"),
     saveState: getElement("#save-state", HTMLElement),
     sheetWrap: getElement("#sheet-wrap", HTMLElement),
@@ -801,6 +1071,27 @@ function initializeApp() {
 
   elements.downloadJsonButton.addEventListener("click", () => {
     downloadFile("spreadsheet.json", toJson(state), "application/json");
+  });
+
+  elements.importSheetButton.addEventListener("click", () => {
+    elements.importFileInput.click();
+  });
+
+  elements.importFileInput.addEventListener("change", () => {
+    const file = elements.importFileInput.files?.item(0);
+    if (!file) return;
+
+    void file.text().then((content: string) => {
+      const lowerName = file.name.toLowerCase();
+      state = lowerName.endsWith(".json") || file.type === "application/json" ? fromJson(content) : fromCsv(content);
+      selectedCell = { rowIndex: 0, columnIndex: 0 };
+      elements.importFileInput.value = "";
+      saveState();
+      render();
+    }).catch(() => {
+      elements.saveState.textContent = "Upload failed";
+      elements.importFileInput.value = "";
+    });
   });
 
   window.addEventListener("hashchange", updateCurrentNavLink);
