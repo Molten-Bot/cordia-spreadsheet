@@ -42,6 +42,11 @@
             </div>
           </div>
 
+          <div class="cell-editor" aria-label="Selected cell editor">
+            <label class="cell-editor-label" id="cell-editor-label" for="cell-editor-input">A1</label>
+            <input id="cell-editor-input" type="text" autocomplete="off" spellcheck="false">
+          </div>
+
           <div class="sheet-wrap" id="sheet-wrap" aria-live="polite">
             <div class="spreadsheet" id="spreadsheet-grid" role="grid" aria-label="Editable spreadsheet"></div>
           </div>
@@ -53,5 +58,16 @@
         <span id="cell-count">0 cells saved</span>
       </footer>
     </div>
+
+    <dialog class="confirm-dialog" id="clear-sheet-dialog" aria-labelledby="clear-dialog-title" aria-describedby="clear-dialog-copy">
+      <form method="dialog">
+        <h2 id="clear-dialog-title">Clear sheet?</h2>
+        <p id="clear-dialog-copy">This removes every cell in the sheet.</p>
+        <div class="dialog-actions">
+          <button class="button secondary" id="cancel-clear-sheet" value="cancel" type="submit">Cancel</button>
+          <button class="button danger" id="confirm-clear-sheet" value="confirm" type="submit">Clear sheet</button>
+        </div>
+      </form>
+    </dialog>
   </body>
 </html>
