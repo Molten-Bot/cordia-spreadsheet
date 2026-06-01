@@ -27,6 +27,11 @@
               <span class="save-state" id="save-state" role="status">Saved locally</span>
             </div>
             <div class="sheet-actions" id="downloads" aria-label="Downloads and sheet actions">
+              <input class="sr-only" id="import-file" type="file" accept=".csv,.json,text/csv,application/json">
+              <button class="button secondary icon-button upload-icon" id="import-sheet" type="button" aria-label="Upload CSV or JSON" title="Upload CSV or JSON">
+                <span class="button-icon" aria-hidden="true"></span>
+                <span class="sr-only">Upload CSV or JSON</span>
+              </button>
               <button class="button secondary icon-button csv-icon" id="download-csv" type="button" aria-label="Download CSV" title="Download CSV">
                 <span class="button-icon" aria-hidden="true"></span>
                 <span class="sr-only">Download CSV</span>
