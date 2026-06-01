@@ -69,7 +69,8 @@ a {
   display: grid;
   grid-template-rows: auto 1fr auto;
   width: 100%;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .topbar,
@@ -137,6 +138,8 @@ a {
 }
 
 main {
+  display: grid;
+  min-width: 0;
   min-height: 0;
   padding: clamp(0.75rem, 2vw, 1.25rem);
 }
@@ -144,8 +147,9 @@ main {
 .sheet-panel {
   display: grid;
   grid-template-rows: auto 1fr;
+  min-width: 0;
+  min-height: 0;
   height: 100%;
-  min-height: calc(100vh - 164px);
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -227,55 +231,70 @@ input:focus {
 }
 
 .sheet-wrap {
+  width: 100%;
+  min-width: 0;
   min-height: 0;
   overflow: auto;
-  background:
-    linear-gradient(90deg, var(--surface-muted) 0 48px, transparent 48px),
-    linear-gradient(var(--surface-muted) 0 40px, transparent 40px);
-}
-
-.spreadsheet {
-  width: max(100%, 980px);
-  border-collapse: separate;
-  border-spacing: 0;
-  table-layout: fixed;
   background: var(--surface);
 }
 
-.spreadsheet th,
-.spreadsheet td {
-  height: 42px;
+.spreadsheet {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+  background: var(--surface);
+}
+
+.grid-corner,
+.grid-header,
+.grid-cell {
+  position: absolute;
+  top: 0;
+  left: 0;
   border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
 
-.spreadsheet th {
-  position: sticky;
+.grid-corner,
+.grid-header {
   z-index: 2;
   background: var(--surface-muted);
   color: var(--muted);
   font-size: 0.82rem;
   font-weight: 800;
+  line-height: 40px;
   text-align: center;
+  user-select: none;
 }
 
-.spreadsheet thead th {
+.grid-corner {
+  position: sticky;
+  z-index: 4;
+  width: 56px;
+  height: 40px;
+  transform: translate(0, 0);
+}
+
+.column-header {
+  position: sticky;
+  z-index: 3;
+  width: 116px;
+  height: 40px;
   top: 0;
 }
 
-.spreadsheet tbody th {
-  left: 0;
-  width: 48px;
-}
-
-.spreadsheet thead th:first-child {
-  left: 0;
+.row-header {
+  position: sticky;
   z-index: 3;
-  width: 48px;
+  width: 56px;
+  height: 42px;
+  left: 0;
+  line-height: 42px;
 }
 
-.spreadsheet td {
-  min-width: 116px;
+.grid-cell {
+  width: 116px;
+  height: 42px;
   background: var(--surface);
 }
 
@@ -319,10 +338,6 @@ input:focus {
 
   .nav a {
     flex: 1;
-  }
-
-  .sheet-panel {
-    min-height: calc(100vh - 224px);
   }
 
   .button {

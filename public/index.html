@@ -35,7 +35,7 @@
           <div class="sheet-toolbar">
             <div class="section-heading">
               <div>
-                <p class="eyebrow">Single shared canvas</p>
+                <p class="eyebrow">1024 x 1024 canvas</p>
                 <h2 id="sheet-title">Working spreadsheet</h2>
               </div>
               <span class="save-state" id="save-state" role="status">Saved locally</span>
@@ -47,8 +47,8 @@
             </div>
           </div>
 
-          <div class="sheet-wrap" aria-live="polite">
-            <table class="spreadsheet" id="spreadsheet-grid" aria-label="Editable spreadsheet"></table>
+          <div class="sheet-wrap" id="sheet-wrap" aria-live="polite">
+            <div class="spreadsheet" id="spreadsheet-grid" role="grid" aria-label="Editable spreadsheet"></div>
           </div>
         </section>
       </main>
